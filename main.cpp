@@ -12,5 +12,6 @@ int main(int argc, char const *argv[])
 
 int do_script(string file)
 {
+    ifstream Script(file);
     return 0;
 }
