@@ -1,0 +1,94 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write  # For creating a release
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          architecture: 'x64'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          if (Test-Path requirements.txt) { pip install -r requirements.txt }
+
+      - name: Generate version
+        id: version
+        run: |
+          # 如果是标签推送，使用标签作为版本号
+          if ("${{ github.event_name }}" -eq "push" -and "${{ github.ref_type }}" -eq "tag") {
+            $version = "${{ github.ref_name }}"
+          } else {
+            # 否则使用短SHA作为版本号
+            $version = "dev-$(git rev-parse --short HEAD)"
+          }
+          echo "VERSION=$version" >> $env:GITHUB_ENV
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Build with PyInstaller
+        run: |
+          # 直接构建到带有版本号的目录
+          $outputDir = "android-flashtool-AFC_${{ env.version }}_windows_x64"
+          
+          # 使用 --distpath 和 --name 参数直接指定输出路径和名称
+          pyinstaller --noconfirm --onedir --console --add-data "commands;commands/" --distpath "dist/$outputDir" --name "android-flashtool" main.py
+          
+          # 创建ZIP压缩包
+          Compress-Archive -Path "dist/$outputDir" -DestinationPath "dist/$outputDir.zip"
+          
+          echo "Build completed successfully"
+          echo "Output directory: dist/$outputDir"
+          echo "ZIP package: dist/$outputDir.zip"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-flashtool-AFC-${{ env.version }}-windows-x64
+          path: dist/android-flashtool-AFC_${{ env.version }}_windows_x64.zip
+          retention-days: 7
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body: |
+            ## Android Flash Tool AFC ${{ github.ref_name }}
+            
+            ### Features:
+            - Automated build with GitHub Actions
+            - Windows 64-bit executable
+            
+            ### Installation:
+            1. Download the ZIP file below
+            2. Extract to your preferred location
+            3. Run `android-flashtool.exe`
+            
+            ### Notes:
+            - This is an automated release
+            - Built from commit ${{ github.sha }}
+          draft: false
+          prerelease: ${{ contains(github.ref, '-') }}  # 如果标签包含连字符，标记为预发布
+          files: |
+            dist/android-flashtool-AFC_${{ env.version }}_windows_x64.zip
